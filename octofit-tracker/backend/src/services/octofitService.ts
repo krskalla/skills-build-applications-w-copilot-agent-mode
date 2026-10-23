@@ -17,6 +17,13 @@ function requireNonEmptyString(value: unknown, label: string) {
   return value.trim();
 }
 
+function requireObjectIdString(value: string, label: string) {
+  if (!mongoose.Types.ObjectId.isValid(value)) {
+    throw invalidInput(`Invalid ${label}.`, 400);
+  }
+  return value;
+}
+
 function toNumber(value: unknown, label: string) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -59,6 +66,64 @@ export async function createActivity(input: unknown) {
   });
 
   return activity.toObject();
+}
+
+export async function updateActivity(activityId: string, input: unknown) {
+  const id = requireObjectIdString(activityId, 'Activity id');
+  const current = await Activity.findById(id);
+  if (!current) {
+    throw invalidInput('Activity not found.', 404);
+  }
+
+  if (!input || typeof input !== 'object') {
+    throw invalidInput('Activity payload is required.', 400);
+  }
+
+  const payload = input as Record<string, unknown>;
+  const nextUserId = payload.userId !== undefined ? requireObjectId(payload.userId, 'userId') : current.user;
+  const nextTeamId = payload.teamId !== undefined ? requireObjectId(payload.teamId, 'teamId') : current.team;
+  const nextType = payload.type !== undefined ? requireNonEmptyString(payload.type, 'Type') : current.type;
+  const nextMinutes = payload.minutes !== undefined ? toNumber(payload.minutes, 'Minutes') : current.minutes;
+  const nextPoints = payload.points !== undefined ? toNumber(payload.points, 'Points') : current.points ?? nextMinutes;
+
+  const user = await User.findById(nextUserId);
+  if (!user) {
+    throw invalidInput('User not found.', 404);
+  }
+  const team = await Team.findById(nextTeamId);
+  if (!team) {
+    throw invalidInput('Team not found.', 404);
+  }
+
+  const updated = await Activity.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        user: nextUserId,
+        team: nextTeamId,
+        type: nextType,
+        minutes: nextMinutes,
+        points: nextPoints,
+        occurredAt: payload.occurredAt ? new Date(payload.occurredAt as string) : current.occurredAt,
+      },
+    },
+    { new: true },
+  );
+
+  if (!updated) {
+    throw invalidInput('Activity not found.', 404);
+  }
+
+  return updated.toObject();
+}
+
+export async function deleteActivity(activityId: string) {
+  const id = requireObjectIdString(activityId, 'Activity id');
+  const result = await Activity.deleteOne({ _id: id });
+  if (result.deletedCount === 0) {
+    throw invalidInput('Activity not found.', 404);
+  }
+  return { deleted: true };
 }
 
 export async function listTeams() {
